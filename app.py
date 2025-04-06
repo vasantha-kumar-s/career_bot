@@ -12,7 +12,7 @@ from contextlib import contextmanager
 app = Flask(__name__)
 
 # Configure Gemini API key
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "your-api-key")
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 genai.configure(api_key=GEMINI_API_KEY)
 
 # Initialize Gemini model
