@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Career Guidance Assistant</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #4285f4;
+            --secondary-color: #34a853;
+            --accent-color: #ea4335;
+            --light-bg: #f8f9fa;
+            --dark-text: #202124;
+            --medium-text: #5f6368;
+            --light-text: #9aa0a6;
+            --border-color: #dadce0;
+            --shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            color: var(--dark-text);
+            background-color: var(--light-bg);
+            line-height: 1.6;
+        }
+
+        .container {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            width: 280px;
+            background-color: white;
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s ease;
+        }
+
+        .sidebar-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .logo {
+            font-size: 22px;
+            font-weight: 700;
+            color: var(--primary-color);
+            display: flex;
+            align-items: center;
+        }
+
+        .logo i {
+            margin-right: 10px;
+        }
+
+        .nav-menu {
+            padding: 20px 0;
+            flex-grow: 1;
+        }
+
+        .nav-item {
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            color: var(--medium-text);
+            text-decoration: none;
+            transition: all 0.2s ease;
+        }
+
+        .nav-item:hover, .nav-item.active {
+            background-color: rgba(66, 133, 244, 0.1);
+            color: var(--primary-color);
+        }
+
+        .nav-item i {
+            margin-right: 12px;
+            font-size: 18px;
+        }
+
+        .user-profile {
+            padding: 15px 20px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+        }
+
+        .avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: var(--primary-color);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 500;
+            margin-right: 12px;
+        }
+
+        .user-info {
+            flex-grow: 1;
+        }
+
+        .user-name {
+            font-weight: 500;
+        }
+
+        .user-status {
+            font-size: 12px;
+            color: var(--light-text);
+        }
+
+        .main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .content-area {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: none;
+        }
+
+        .content-area.active {
+            display: block;
+        }
+
+        .chat-container {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .chat-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border-color);
+            background-color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .chat-title {
+            font-size: 18px;
+            font-weight: 500;
+        }
+
+        .chat-actions {
+            display: flex;
+        }
+
+        .action-btn {
+            background: none;
+            border: none;
+            color: var(--medium-text);
+            font-size: 16px;
+            cursor: pointer;
+            margin-left: 15px;
+            transition: color 0.2s ease;
+        }
+
+        .action-btn:hover {
+            color: var(--primary-color);
+        }
+
+        .chat-messages {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background-color: var(--light-bg);
+        }
+
+        .message {
+            margin-bottom: 20px;
+            max-width: 80%;
+        }
+
+        .message-user {
+            margin-left: auto;
+        }
+
+        .message-bot {
+            margin-right: auto;
+        }
+
+        .message-content {
+            padding: 12px 16px;
+            border-radius: 18px;
+            box-shadow: var(--shadow);
+            position: relative;
+        }
+
+        .message-user .message-content {
+            background-color: var(--primary-color);
+            color: white;
+            border-top-right-radius: 4px;
+        }
+
+        .message-bot .message-content {
+            background-color: white;
+            border-top-left-radius: 4px;
+        }
+
+        .message-time {
+            font-size: 11px;
+            color: var(--light-text);
+            margin-top: 5px;
+            text-align: right;
+        }
+
+        .chat-input {
+            padding: 15px 20px;
+            background-color: white;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .input-container {
+            display: flex;
+            align-items: center;
+            background-color: var(--light-bg);
+            border-radius: 24px;
+            padding: 8px 16px;
+        }
+
+        .message-input {
+            flex-grow: 1;
+            border: none;
+            background: none;
+            padding: 8px 0;
+            outline: none;
+            font-size: 14px;
+        }
+
+        .send-btn {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+
+        .send-btn:hover {
+            background-color: #3367d6;
+        }
+
+        .send-btn:disabled {
+            background-color: var(--light-text);
+            cursor: not-allowed;
+        }
+
+        /* Recommendations Section */
+        .recommendations-container {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            margin-bottom: 20px;
+        }
+
+        .recommendation-card {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .recommendation-card:last-child {
+            border-bottom: none;
+        }
+
+        .recommendation-title {
+            font-size: 18px;
+            font-weight: 500;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+        }
+
+        .recommendation-text {
+            margin-bottom: 15px;
+        }
+
+        .confidence-meter {
+            height: 6px;
+            background-color: var(--light-bg);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .confidence-level {
+            height: 100%;
+            background-color: var(--secondary-color);
+        }
+
+        .refresh-btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            margin-top: 20px;
+        }
+
+        .refresh-btn:hover {
+            background-color: #3367d6;
+        }
+
+        /* Mentors Section */
+        .filter-container {
+            display: flex;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .filter-btn {
+            padding: 8px 16px;
+            background-color: white;
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .filter-btn.active {
+            background-color: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+        }
+
+        .mentor-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .mentor-card {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+        }
+
+        .mentor-header {
+            padding: 20px;
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .mentor-name {
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 5px;
+        }
+
+        .mentor-title {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .mentor-details {
+            padding: 20px;
+        }
+
+        .mentor-info {
+            margin-bottom: 15px;
+        }
+
+        .info-label {
+            font-size: 12px;
+            color: var(--light-text);
+            margin-bottom: 5px;
+        }
+
+        .info-value {
+            font-weight: 500;
+        }
+
+        .connect-btn {
+            width: 100%;
+            padding: 10px;
+            background-color: var(--secondary-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+
+        .connect-btn:hover {
+            background-color: #2d9249;
+        }
+
+        /* Jobs Section */
+        .job-card {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        .job-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+
+        .job-title {
+            font-size: 18px;
+            font-weight: 500;
+            color: var(--primary-color);
+            margin-bottom: 5px;
+        }
+
+        .job-company {
+            font-size: 14px;
+            color: var(--medium-text);
+        }
+
+        .job-salary {
+            font-weight: 500;
+            color: var(--secondary-color);
+        }
+
+        .job-details {
+            margin-bottom: 15px;
+        }
+
+        .job-location, .job-industry {
+            display: flex;
+            align-items: center;
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: var(--medium-text);
+        }
+
+        .job-location i, .job-industry i {
+            margin-right: 8px;
+            font-size: 16px;
+        }
+
+        .job-description {
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+
+        .job-requirements {
+            background-color: var(--light-bg);
+            padding: 15px;
+            border-radius: 4px;
+            font-size: 14px;
+            white-space: pre-line;
+        }
+
+        .apply-btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            margin-top: 15px;
+        }
+
+        .apply-btn:hover {
+            background-color: #d33426;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .container {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+                border-right: none;
+                border-bottom: 1px solid var(--border-color);
+            }
+
+            .nav-menu {
+                display: flex;
+                padding: 0;
+                overflow-x: auto;
+            }
+
+            .nav-item {
+                padding: 15px;
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .nav-item i {
+                margin-right: 0;
+                margin-bottom: 5px;
+            }
+
+            .user-profile {
+                display: none;
+            }
+
+            .message {
+                max-width: 90%;
+            }
+
+            .mentor-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Loading Indicator */
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .typing-bubble {
+            height: 10px;
+            width: 10px;
+            border-radius: 50%;
+            background-color: var(--light-text);
+            margin-right: 5px;
+            animation: typing 1s infinite ease-in-out;
+        }
+
+        .typing-bubble:nth-child(1) {
+            animation-delay: 0s;
+        }
+
+        .typing-bubble:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-bubble:nth-child(3) {
+            animation-delay: 0.4s;
+            margin-right: 0;
+        }
+
+        @keyframes typing {
+            0% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-5px);
+            }
+            100% {
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <i class="fas fa-briefcase"></i>
+                    Career Guide
+                </div>
+            </div>
+            <div class="nav-menu">
+                <a href="#" class="nav-item active" data-target="chat">
+                    <i class="fas fa-comment-alt"></i>
+                    <span>Chat</span>
+                </a>
+                <a href="#" class="nav-item" data-target="recommendations">
+                    <i class="fas fa-chart-line"></i>
+                    <span>Recommendations</span>
+                </a>
+                <a href="#" class="nav-item" data-target="mentors">
+                    <i class="fas fa-users"></i>
+                    <span>Mentors</span>
+                </a>
+                <a href="#" class="nav-item" data-target="jobs">
+                    <i class="fas fa-building"></i>
+                    <span>Jobs</span>
+                </a>
+            </div>
+            <div class="user-profile">
+                <div class="avatar">U</div>
+                <div class="user-info">
+                    <div class="user-name">User</div>
+                    <div class="user-status">Online</div>
+                </div>
+            </div>
+        </div>
+        <div class="main-content">
+            <!-- Chat Section -->
+            <div class="content-area active" id="chat">
+                <div class="chat-container">
+                    <div class="chat-header">
+                        <div class="chat-title">Career Guidance Assistant</div>
+                        <div class="chat-actions">
+                            <button class="action-btn" title="Clear Chat">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                            <button class="action-btn" title="Settings">
+                                <i class="fas fa-cog"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="chat-messages" id="chat-messages">
+                        <div class="message message-bot">
+                            <div class="message-content">
+                                <p>Hello! I'm your career guidance assistant. How can I help you today? I can help with career planning, skill development, or connecting you with mentors.</p>
+                            </div>
+                            <div class="message-time">5:48 PM</div>
+                        </div>
+                        <!-- Messages will be added here dynamically -->
+                    </div>
+                    <div class="chat-input">
+                        <div class="input-container">
+                            <input type="text" class="message-input" id="message-input" placeholder="Type your message..." autocomplete="off">
+                            <button class="send-btn" id="send-btn" disabled>
+                                <i class="fas fa-paper-plane"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recommendations Section -->
+            <div class="content-area" id="recommendations">
+                <h2>Your Career Recommendations</h2>
+                <p>Based on your skills, interests, and experience, here are some career paths that might be a good fit for you.</p>
+                <div class="recommendations-container" id="recommendations-container">
+                    <!-- Recommendations will be added here dynamically -->
+                </div>
+                <button class="refresh-btn" id="refresh-recommendations">Refresh Recommendations</button>
+            </div>
+
+            <!-- Mentors Section -->
+            <div class="content-area" id="mentors">
+                <h2>Find a Mentor</h2>
+                <p>Connect with experienced professionals who can guide you in your career journey.</p>
+                <div class="filter-container">
+                    <button class="filter-btn active" data-industry="all">All Industries</button>
+                    <button class="filter-btn" data-industry="technology">Technology</button>
+                    <button class="filter-btn" data-industry="finance">Finance</button>
+                    <button class="filter-btn" data-industry="healthcare">Healthcare</button>
+                    <button class="filter-btn" data-industry="education">Education</button>
+                </div>
+                
+                    <div class="mentor-grid" id="mentor-grid">
+                    <!-- Mentors will be added here dynamically -->
+                    </div>
+                    </div> 
+                            <!-- Jobs Section -->
+        <div class="content-area" id="jobs">
+            <h2>Job Opportunities</h2>
+            <p>Discover job openings that match your skills and interests.</p>
+            <div class="filter-container">
+                <button class="filter-btn active" data-industry="all">All Industries</button>
+                <button class="filter-btn" data-industry="technology">Technology</button>
+                <button class="filter-btn" data-industry="finance">Finance</button>
+                <button class="filter-btn" data-industry="healthcare">Healthcare</button>
+                <button class="filter-btn" data-industry="education">Education</button>
+            </div>
+            <div id="jobs-container">
+                <!-- Jobs will be added here dynamically -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Global variables
+    let currentUserId = 1; // For demo purposes
+    let isTyping = false;
+
+    // DOM Elements
+    const messageInput = document.getElementById('message-input');
+    const sendButton = document.getElementById('send-btn');
+    const chatMessages = document.getElementById('chat-messages');
+    const navItems = document.querySelectorAll('.nav-item');
+    const contentAreas = document.querySelectorAll('.content-area');
+    const refreshRecommendationsBtn = document.getElementById('refresh-recommendations');
+    const filterButtons = document.querySelectorAll('.filter-btn');
+
+    // Initialize the app
+    document.addEventListener('DOMContentLoaded', function() {
+        // Enable/disable send button based on input
+        messageInput.addEventListener('input', function() {
+            sendButton.disabled = messageInput.value.trim() === '';
+        });
+
+        // Send message on Enter key
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && messageInput.value.trim() !== '') {
+                sendMessage();
+            }
+        });
+
+        // Send message on button click
+        sendButton.addEventListener('click', sendMessage);
+
+        // Navigation between sections
+        navItems.forEach(item => {
+            item.addEventListener('click', function(e) {
+                e.preventDefault();
+                const target = this.getAttribute('data-target');
+                
+                // Update active nav item
+                navItems.forEach(nav => nav.classList.remove('active'));
+                this.classList.add('active');
+                
+                // Show corresponding content area
+                contentAreas.forEach(area => {
+                    area.classList.remove('active');
+                    if (area.id === target) {
+                        area.classList.add('active');
+                        
+                        // Load content based on section
+                        if (target === 'recommendations') {
+                            loadRecommendations();
+                        } else if (target === 'mentors') {
+                            loadMentors();
+                        } else if (target === 'jobs') {
+                            loadJobs();
+                        }
+                    }
+                });
+            });
+        });
+
+        // Refresh recommendations
+        refreshRecommendationsBtn.addEventListener('click', loadRecommendations);
+
+        // Filter buttons
+        filterButtons.forEach(button => {
+            button.addEventListener('click', function() {
+                const industry = this.getAttribute('data-industry');
+                const parentSection = this.closest('.content-area');
+                
+                // Update active filter
+                const siblingFilters = parentSection.querySelectorAll('.filter-btn');
+                siblingFilters.forEach(btn => btn.classList.remove('active'));
+                this.classList.add('active');
+                
+                // Apply filter
+                if (parentSection.id === 'mentors') {
+                    loadMentors(industry);
+                } else if (parentSection.id === 'jobs') {
+                    loadJobs(industry);
+                }
+            });
+        });
+
+        // Load initial data
+        loadRecommendations();
+        loadMentors();
+        loadJobs();
+    });
+
+    // Send message function
+    function sendMessage() {
+        if (isTyping) return;
+        
+        const message = messageInput.value.trim();
+        if (message === '') return;
+        
+        // Add user message to chat
+        addMessageToChat('user', message);
+        
+        // Clear input
+        messageInput.value = '';
+        sendButton.disabled = true;
+        
+        // Show typing indicator
+        showTypingIndicator();
+        
+        // Send message to API
+        fetch('/api/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                user_id: currentUserId,
+                message: message
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            // Hide typing indicator
+            hideTypingIndicator();
+            
+            // Add bot response to chat
+            addMessageToChat('bot', data.response);
+            
+            // Scroll to bottom
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            hideTypingIndicator();
+            addMessageToChat('bot', 'Sorry, I encountered an error. Please try again.');
+        });
+    }
+
+    // Add message to chat
+    function addMessageToChat(role, content) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message message-${role}`;
+        
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+        
+        // Format content with markdown-like syntax
+        content = formatMessageContent(content);
+        
+        contentDiv.innerHTML = content;
+        
+        const timeDiv = document.createElement('div');
+        timeDiv.className = 'message-time';
+        
+        const now = new Date();
+        timeDiv.textContent = `${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}`;
+        
+        messageDiv.appendChild(contentDiv);
+        messageDiv.appendChild(timeDiv);
+        
+        chatMessages.appendChild(messageDiv);
+        
+        // Scroll to bottom
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // Format message content with basic markdown
+    function formatMessageContent(content) {
+        // Convert line breaks to <br>
+        content = content.replace(/\n/g, '<br>');
+        
+        // Bold text
+        content = content.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        
+        // Italic text
+        content = content.replace(/\*(.*?)\*/g, '<em>$1</em>');
+        
+        // Lists
+        content = content.replace(/- (.*?)(?=<br>|$)/g, '-  $1');
+        
+        return content;
+    }
+
+    // Show typing indicator
+    function showTypingIndicator() {
+        isTyping = true;
+        
+        const typingDiv = document.createElement('div');
+        typingDiv.className = 'typing-indicator message message-bot';
+        typingDiv.id = 'typing-indicator';
+        
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'message-content';
+        
+        for (let i = 0; i < 3; i++) {
+            const bubble = document.createElement('div');
+            bubble.className = 'typing-bubble';
+            contentDiv.appendChild(bubble);
+        }
+        
+        typingDiv.appendChild(contentDiv);
+        chatMessages.appendChild(typingDiv);
+        
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    // Hide typing indicator
+    function hideTypingIndicator() {
+        isTyping = false;
+        
+        const typingIndicator = document.getElementById('typing-indicator');
+        if (typingIndicator) {
+            typingIndicator.remove();
+        }
+    }
+
+    // Load recommendations
+    function loadRecommendations() {
+        const container = document.getElementById('recommendations-container');
+        container.innerHTML = '<p>Loading recommendations...</p>';
+        
+        fetch(`/api/recommendations?user_id=${currentUserId}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    container.innerHTML = `<p>${data.error}</p>`;
+                    return;
+                }
+                
+                if (data.recommendations && data.recommendations.length > 0) {
+                    container.innerHTML = '';
+                    
+                    data.recommendations.forEach(rec => {
+                        const recCard = document.createElement('div');
+                        recCard.className = 'recommendation-card';
+                        
+                        recCard.innerHTML = `
+                            <div class="recommendation-title">${rec.career_path}</div>
+                            <div class="recommendation-text">${rec.text}</div>
+                            <div class="confidence-meter">
+                                <div class="confidence-level" style="width: ${rec.confidence}%"></div>
+                            </div>
+                            <div class="confidence-text">${rec.confidence}% match</div>
+                        `;
+                        
+                        container.appendChild(recCard);
+                    });
+                } else {
+                    container.innerHTML = '<p>No recommendations available. Complete some quizzes to get personalized recommendations.</p>';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                container.innerHTML = '<p>Error loading recommendations. Please try again.</p>';
+            });
+    }
+
+    // Load mentors
+    function loadMentors(industry = 'all') {
+        const container = document.getElementById('mentor-grid');
+        container.innerHTML = '<p>Loading mentors...</p>';
+        
+        let url = '/api/mentors';
+        if (industry !== 'all') {
+            url += `?industry=${industry}`;
+        }
+        
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                if (data.mentors && data.mentors.length > 0) {
+                    container.innerHTML = '';
+                    
+                    data.mentors.forEach(mentor => {
+                        const mentorCard = document.createElement('div');
+                        mentorCard.className = 'mentor-card';
+                        
+                        mentorCard.innerHTML = `
+                            <div class="mentor-header">
+                                <div class="mentor-name">${mentor.name}</div>
+                                <div class="mentor-title">${mentor.expertise}</div>
+                            </div>
+                            <div class="mentor-details">
+                                <div class="mentor-info">
+                                    <div class="info-label">Industry</div>
+                                    <div class="info-value">${mentor.industry}</div>
+                                </div>
+                                <div class="mentor-info">
+                                    <div class="info-label">Experience</div>
+                                    <div class="info-value">${mentor.experience_years} years</div>
+                                </div>
+                                <button class="connect-btn" data-mentor-id="${mentor.id}">Connect</button>
+                            </div>
+                        `;
+                        
+                        container.appendChild(mentorCard);
+                    });
+                    
+                    // Add event listeners to connect buttons
+                    document.querySelectorAll('.connect-btn').forEach(btn => {
+                        btn.addEventListener('click', function() {
+                            const mentorId = this.getAttribute('data-mentor-id');
+                            connectWithMentor(mentorId);
+                        });
+                    });
+                } else {
+                    container.innerHTML = '<p>No mentors available for this filter.</p>';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                container.innerHTML = '<p>Error loading mentors. Please try again.</p>';
+            });
+    }
+
+    // Connect with mentor
+    function connectWithMentor(mentorId) {
+        fetch('/api/mentor-connection', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                user_id: currentUserId,
+                mentor_id: mentorId
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                alert(data.error);
+            } else {
+                alert('Connection request sent to mentor!');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error connecting with mentor. Please try again.');
+        });
+    }
+
+    // Load jobs
+    function loadJobs(industry = 'all') {
+        const container = document.getElementById('jobs-container');
+        container.innerHTML = '<p>Loading job opportunities...</p>';
+        
+        let url = '/api/jobs';
+        if (industry !== 'all') {
+            url += `?industry=${industry}`;
+        }
+        
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                if (data.jobs && data.jobs.length > 0) {
+                    container.innerHTML = '';
+                    
+                    data.jobs.forEach(job => {
+                        const jobCard = document.createElement('div');
+                        jobCard.className = 'job-card';
+                        
+                        const postedDate = new Date(job.posted_at);
+                        const daysAgo = Math.floor((new Date() - postedDate) / (1000 * 60 * 60 * 24));
+                        
+                        jobCard.innerHTML = `
+                            <div class="job-header">
+                                <div>
+                                    <div class="job-title">${job.title}</div>
+                                    <div class="job-company">${job.company}</div>
+                                </div>
+                                <div class="job-salary">${job.salary_range}</div>
+                            </div>
+                            <div class="job-details">
+                                <div class="job-location"><i class="fas fa-map-marker-alt"></i> ${job.location}</div>
+                                <div class="job-industry"><i class="fas fa-briefcase"></i> ${job.industry}</div>
+                            </div>
+                            <div class="job-description">${job.description}</div>
+                            <div class="job-requirements">${job.requirements}</div>
+                            <div class="job-posted">Posted ${daysAgo} days ago</div>
+                            <button class="apply-btn">Apply Now</button>
+                        `;
+                        
+                        container.appendChild(jobCard);
+                    });
+                } else {
+                    container.innerHTML = '<p>No job opportunities available for this filter.</p>';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                container.innerHTML = '<p>Error loading job opportunities. Please try again.</p>';
+            });
+    }
+</script>
+</body> </html>
