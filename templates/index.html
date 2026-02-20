@@ -605,10 +605,10 @@
                 </a>
             </div>
             <div class="user-profile">
-                <div class="avatar">U</div>
+                <div class="avatar" id="user-avatar">?</div>
                 <div class="user-info">
-                    <div class="user-name">User</div>
-                    <div class="user-status">Online</div>
+                    <div class="user-name" id="user-name">Guest</div>
+                    <div class="user-status">Click to change user</div>
                 </div>
             </div>
         </div>
@@ -691,9 +691,26 @@
     </div>
 </div>
 
+<!-- User Selection Modal -->
+<div id="user-modal" style="display: flex; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); align-items: center; justify-content: center; z-index: 1000;">
+    <div style="background: white; padding: 40px; border-radius: 12px; max-width: 500px; width: 90%;">
+        <h2 style="margin-bottom: 20px; color: var(--primary-color);">Select Demo User</h2>
+        <p style="margin-bottom: 20px; color: var(--medium-text);">Choose a demo user to start using the Career Guidance Assistant:</p>
+        <div id="user-list" style="display: flex; flex-direction: column; gap: 10px;">
+            <!-- Users will be loaded dynamically -->
+        </div>
+        <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+            <input type="email" id="new-user-email" placeholder="Or create new user: email@example.com" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; margin-bottom: 10px;">
+            <input type="text" id="new-user-name" placeholder="Full Name" style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 4px; margin-bottom: 10px;">
+            <button id="create-user-btn" style="width: 100%; padding: 12px; background: var(--secondary-color); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500;">Create New User</button>
+        </div>
+    </div>
+</div>
+
 <script>
     // Global variables
-    let currentUserId = 1; // For demo purposes
+    let currentUserId = null;
+    let currentUserName = '';
     let isTyping = false;
 
     // DOM Elements
@@ -705,8 +722,100 @@
     const refreshRecommendationsBtn = document.getElementById('refresh-recommendations');
     const filterButtons = document.querySelectorAll('.filter-btn');
 
+    // Load demo users
+    function loadDemoUsers() {
+        fetch('/api/demo-users')
+            .then(response => response.json())
+            .then(data => {
+                const userList = document.getElementById('user-list');
+                userList.innerHTML = '';
+                
+                if (data.users && data.users.length > 0) {
+                    data.users.forEach(user => {
+                        const userBtn = document.createElement('button');
+                        userBtn.className = 'user-select-btn';
+                        userBtn.style.cssText = 'width: 100%; padding: 15px; background: var(--light-bg); border: 2px solid var(--border-color); border-radius: 8px; cursor: pointer; text-align: left; transition: all 0.2s;';
+                        userBtn.innerHTML = `
+                            <div style="font-weight: 500; margin-bottom: 5px;">${user.name}</div>
+                            <div style="font-size: 14px; color: var(--medium-text);">${user.email}</div>
+                        `;
+                        userBtn.addEventListener('click', () => selectUser(user._id, user.name));
+                        userBtn.addEventListener('mouseenter', function() {
+                            this.style.borderColor = 'var(--primary-color)';
+                            this.style.background = 'white';
+                        });
+                        userBtn.addEventListener('mouseleave', function() {
+                            this.style.borderColor = 'var(--border-color)';
+                            this.style.background = 'var(--light-bg)';
+                        });
+                        userList.appendChild(userBtn);
+                    });
+                }
+            })
+            .catch(error => console.error('Error loading users:', error));
+    }
+
+    // Select user
+    function selectUser(userId, userName) {
+        currentUserId = userId;
+        currentUserName = userName;
+        document.getElementById('user-modal').style.display = 'none';
+        document.getElementById('user-name').textContent = userName;
+        document.getElementById('user-avatar').textContent = userName.charAt(0).toUpperCase();
+        
+        // Clear and reload data
+        document.getElementById('chat-messages').innerHTML = `
+            <div class="message message-bot">
+                <div class="message-content">
+                    <p>Hello ${userName}! I'm your career guidance assistant. How can I help you today? I can help with career planning, skill development, or connecting you with mentors.</p>
+                </div>
+                <div class="message-time">Just now</div>
+            </div>
+        `;
+    }
+
+    // Create new user
+    function createNewUser() {
+        const email = document.getElementById('new-user-email').value.trim();
+        const name = document.getElementById('new-user-name').value.trim();
+        
+        if (!email || !name) {
+            alert('Please enter both email and name');
+            return;
+        }
+        
+        fetch('/api/user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, email, demographics: {} })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.user_id) {
+                selectUser(data.user_id, name);
+            } else {
+                alert(data.error || 'Error creating user');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error creating user');
+        });
+    }
+
     // Initialize the app
     document.addEventListener('DOMContentLoaded', function() {
+        // Load demo users
+        loadDemoUsers();
+        
+        // Create user button
+        document.getElementById('create-user-btn').addEventListener('click', createNewUser);
+        
+        // User profile click to change user
+        document.querySelector('.user-profile').addEventListener('click', function() {
+            document.getElementById('user-modal').style.display = 'flex';
+            loadDemoUsers();
+        });
         // Enable/disable send button based on input
         messageInput.addEventListener('input', function() {
             sendButton.disabled = messageInput.value.trim() === '';
@@ -782,6 +891,11 @@
 
     // Send message function
     function sendMessage() {
+        if (!currentUserId) {
+            alert('Please select a user first');
+            return;
+        }
+        
         if (isTyping) return;
         
         const message = messageInput.value.trim();
@@ -906,6 +1020,12 @@
 
     // Load recommendations
     function loadRecommendations() {
+        if (!currentUserId) {
+            const container = document.getElementById('recommendations-container');
+            container.innerHTML = '<p>Please select a user to view recommendations.</p>';
+            return;
+        }
+        
         const container = document.getElementById('recommendations-container');
         container.innerHTML = '<p>Loading recommendations...</p>';
         

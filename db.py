@@ -1,114 +1,129 @@
-# db.py - Database Models
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, ForeignKey, JSON, Index
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, relationship, scoped_session
-import datetime
+# db.py - MongoDB Database Setup
+from pymongo import MongoClient, ASCENDING, DESCENDING
+from pymongo.errors import DuplicateKeyError
+from datetime import datetime
+from werkzeug.security import generate_password_hash, check_password_hash
+import os
 
-DATABASE_URL = "sqlite:///career_guidance.db"
-engine = create_engine(DATABASE_URL, echo=True, pool_pre_ping=True, pool_size=10, max_overflow=20)
-session_factory = sessionmaker(bind=engine)
-SessionLocal = scoped_session(session_factory)
-Base = declarative_base()
+# MongoDB connection
+MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb+srv://gcorporation04_db_user:oc8e32NtQc6Rjx9Q@cluster0.yzk9icp.mongodb.net/?appName=Cluster0")
+DB_NAME = "career_guidance_db"
 
-class User(Base):
-    __tablename__ = "users"
-    user_id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    email = Column(String, unique=True, index=True)
-    demographics = Column(Text)  # JSON string
-    created_at = Column(DateTime, default=datetime.datetime.utcnow)
-    
-    # Relationships
-    sessions = relationship("UserSession", back_populates="user")
-    quiz_responses = relationship("QuizResponse", back_populates="user")
-    recommendations = relationship("CareerRecommendation", back_populates="user")
-    mentor_connections = relationship("MentorConnection", back_populates="user")
+# Initialize MongoDB client
+client = MongoClient(MONGODB_URI)
+db = client[DB_NAME]
 
-class UserSession(Base):
-    __tablename__ = "user_sessions"
-    session_id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), index=True)
-    conversation_history = Column(Text)  # JSON array of messages
-    last_updated = Column(DateTime, default=datetime.datetime.utcnow, index=True)
-    
-    # Relationships
-    user = relationship("User", back_populates="sessions")
+# Collection references
+users_collection = db["users"]
+sessions_collection = db["user_sessions"]
+quiz_responses_collection = db["quiz_responses"]
+recommendations_collection = db["career_recommendations"]
+mentors_collection = db["mentors"]
+mentor_connections_collection = db["mentor_connections"]
+jobs_collection = db["job_opportunities"]
 
-class QuizResponse(Base):
-    __tablename__ = "quiz_responses"
-    response_id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), index=True)
-    question = Column(Text)
-    answer = Column(Text)
-    quiz_type = Column(String, index=True)  # "experience", "skills", "interests", etc.
-    timestamp = Column(DateTime, default=datetime.datetime.utcnow, index=True)
-    
-    # Relationships
-    user = relationship("User", back_populates="quiz_responses")
-    
-    # Add compound index for faster filtering by user_id and quiz_type
-    __table_args__ = (Index('idx_user_quiz_type', "user_id", "quiz_type"),)
-
-class CareerRecommendation(Base):
-    __tablename__ = "career_recommendations"
-    recommendation_id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), index=True)
-    career_path = Column(String, index=True)
-    recommendation_text = Column(Text)
-    confidence_score = Column(Integer)  # 0-100 score of recommendation confidence
-    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
-    
-    # Relationships
-    user = relationship("User", back_populates="recommendations")
-
-class Mentor(Base):
-    __tablename__ = "mentors"
-    mentor_id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    industry = Column(String, index=True)
-    expertise = Column(String, index=True)
-    experience_years = Column(Integer)
-    availability = Column(String)  # JSON string for availability schedule
-    
-    # Relationships
-    connections = relationship("MentorConnection", back_populates="mentor")
-    
-    # Add compound index for faster filtering by industry and expertise
-    __table_args__ = (Index('idx_industry_expertise', "industry", "expertise"),)
-
-class MentorConnection(Base):
-    __tablename__ = "mentor_connections"
-    connection_id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.user_id"), index=True)
-    mentor_id = Column(Integer, ForeignKey("mentors.mentor_id"), index=True)
-    status = Column(String, index=True)  # pending, connected, rejected
-    created_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
-    
-    # Relationships
-    user = relationship("User", back_populates="mentor_connections")
-    mentor = relationship("Mentor", back_populates="connections")
-    
-    # Add compound index for faster lookups
-    __table_args__ = (Index('idx_user_mentor', "user_id", "mentor_id"),)
-
-class JobOpportunity(Base):
-    __tablename__ = "job_opportunities"
-    job_id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, nullable=False)
-    company = Column(String, index=True)
-    description = Column(Text)
-    industry = Column(String, index=True)
-    location = Column(String, index=True)
-    salary_range = Column(String)
-    requirements = Column(Text)
-    posted_at = Column(DateTime, default=datetime.datetime.utcnow, index=True)
-
-    # Add compound index for common filters
-    __table_args__ = (Index('idx_industry_location', "industry", "location"),)
-
-# Create tables
 def init_db():
-    Base.metadata.create_all(bind=engine)
+    """Initialize database indexes for optimal performance"""
+    
+    # Users collection indexes
+    users_collection.create_index([("email", ASCENDING)], unique=True)
+    users_collection.create_index([("username", ASCENDING)], unique=True)
+    users_collection.create_index([("user_type", ASCENDING)])
+    users_collection.create_index([("created_at", DESCENDING)])
+    
+    # User sessions collection indexes
+    sessions_collection.create_index([("user_id", ASCENDING)])
+    sessions_collection.create_index([("last_updated", DESCENDING)])
+    
+    # Quiz responses collection indexes
+    quiz_responses_collection.create_index([("user_id", ASCENDING)])
+    quiz_responses_collection.create_index([("quiz_type", ASCENDING)])
+    quiz_responses_collection.create_index([("user_id", ASCENDING), ("quiz_type", ASCENDING)])
+    quiz_responses_collection.create_index([("timestamp", DESCENDING)])
+    
+    # Career recommendations collection indexes
+    recommendations_collection.create_index([("user_id", ASCENDING)])
+    recommendations_collection.create_index([("career_path", ASCENDING)])
+    recommendations_collection.create_index([("created_at", DESCENDING)])
+    
+    # Mentors collection indexes
+    mentors_collection.create_index([("industry", ASCENDING)])
+    mentors_collection.create_index([("expertise", ASCENDING)])
+    mentors_collection.create_index([("industry", ASCENDING), ("expertise", ASCENDING)])
+    
+    # Mentor connections collection indexes
+    mentor_connections_collection.create_index([("user_id", ASCENDING)])
+    mentor_connections_collection.create_index([("mentor_id", ASCENDING)])
+    mentor_connections_collection.create_index([("user_id", ASCENDING), ("mentor_id", ASCENDING)])
+    mentor_connections_collection.create_index([("status", ASCENDING)])
+    mentor_connections_collection.create_index([("created_at", DESCENDING)])
+    
+    # Job opportunities collection indexes
+    jobs_collection.create_index([("industry", ASCENDING)])
+    jobs_collection.create_index([("location", ASCENDING)])
+    jobs_collection.create_index([("company", ASCENDING)])
+    jobs_collection.create_index([("industry", ASCENDING), ("location", ASCENDING)])
+    jobs_collection.create_index([("posted_at", DESCENDING)])
+    
+    print("MongoDB indexes created successfully!")
+
+def get_db():
+    """Returns the database instance"""
+    return db
+
+def create_default_users():
+    """Create default user and mentor accounts if they don't exist"""
+    try:
+        # Check if default user exists
+        if not users_collection.find_one({'username': 'user'}):
+            user_doc = {
+                'username': 'user',
+                'email': 'user@example.com',
+                'password_hash': generate_password_hash('password'),
+                'name': 'Demo User',
+                'user_type': 'user',
+                'demographics': {
+                    'skills': ['Programming', 'Analysis'],
+                    'interests': 'Technology and Innovation',
+                    'education': 'Bachelor\'s Degree',
+                    'experience': '2 years',
+                    'goals': 'Advance career in tech',
+                    'location': 'New York, NY'
+                },
+                'created_at': datetime.utcnow()
+            }
+            users_collection.insert_one(user_doc)
+            print("✓ Default user account created (username: user, password: password)")
+        
+        # Check if default mentor exists
+        if not users_collection.find_one({'username': 'mentor'}):
+            mentor_doc = {
+                'username': 'mentor',
+                'email': 'mentor@example.com',
+                'password_hash': generate_password_hash('password'),
+                'name': 'Demo Mentor',
+                'user_type': 'mentor',
+                'demographics': {
+                    'skills': ['Leadership', 'Management', 'Mentoring'],
+                    'interests': 'Helping others succeed',
+                    'education': 'Master\'s Degree',
+                    'experience': '10 years',
+                    'industry': 'Technology',
+                    'title': 'Senior Engineering Manager',
+                    'company': 'Tech Corp',
+                    'expertise': ['Software Engineering', 'Career Development', 'Technical Leadership'],
+                    'bio': 'Experienced technology leader passionate about mentoring the next generation of tech professionals.',
+                    'location': 'San Francisco, CA'
+                },
+                'created_at': datetime.utcnow()
+            }
+            users_collection.insert_one(mentor_doc)
+            print("✓ Default mentor account created (username: mentor, password: password)")
+    
+    except Exception as e:
+        print(f"Note: Default users may already exist or error occurred: {e}")
 
 if __name__ == "__main__":
     init_db()
+    create_default_users()
+    print("Database initialized successfully!")

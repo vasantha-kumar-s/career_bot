@@ -1,1 +1,6 @@
 .env
+PROJECT_NOTES.md
+__pycache__/
+*.pyc
+*.pyo
+career_guidance.db

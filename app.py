@@ -1,455 +1,704 @@
-# app.py - Flask API
-from flask import Flask, request, jsonify, render_template
-from sqlalchemy.orm import Session
+# app.py - Flask API with MongoDB, Gemini API, and Authentication
+from flask import Flask, request, jsonify, render_template, redirect, url_for, session
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+from bson import ObjectId
 import json
 import datetime
-import google.generativeai as genai
 import os
-from db import SessionLocal, User, UserSession, QuizResponse, CareerRecommendation, Mentor, MentorConnection, JobOpportunity
-from functools import lru_cache
-from contextlib import contextmanager
+from db import (
+    db, users_collection, sessions_collection, quiz_responses_collection,
+    recommendations_collection, mentors_collection, mentor_connections_collection,
+    jobs_collection, create_default_users
+)
+
+# Explicit Gemini API import with failure handling (API may be out of quota)
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+    print("✓ Gemini API library loaded successfully")
+except ImportError as e:
+    GEMINI_AVAILABLE = False
+    print(f"⚠ Gemini API library not available: {e}")
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'your-secret-key-change-in-production')
 
-# Configure Gemini API key
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
-genai.configure(api_key=GEMINI_API_KEY)
+# Configure Flask-Login
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
 
-# Initialize Gemini model
-model = genai.GenerativeModel('gemini-2.0-flash-lite')
+# User class for Flask-Login
+class User(UserMixin):
+    def __init__(self, user_data):
+        self.id = str(user_data['_id'])
+        self.username = user_data['username']
+        self.email = user_data.get('email', '')
+        self.name = user_data.get('name', '')
+        self.user_type = user_data.get('user_type', 'user')
+        self.demographics = user_data.get('demographics', {})
 
-@contextmanager
-def get_db():
-    db = SessionLocal()
+@login_manager.user_loader
+def load_user(user_id):
     try:
-        yield db
-    finally:
-        db.close()
+        user_data = users_collection.find_one({'_id': ObjectId(user_id)})
+        if user_data:
+            return User(user_data)
+    except Exception as e:
+        print(f"Error loading user: {e}")
+    return None
+
+# Configure Gemini API with explicit error handling
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+model = None
+
+if GEMINI_AVAILABLE and GEMINI_API_KEY:
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        print("✓ Gemini API configured successfully")
+    except Exception as e:
+        model = None
+        print(f"⚠ Failed to configure Gemini API (expected when quota exceeded): {e}")
+else:
+    if not GEMINI_AVAILABLE:
+        print("⚠ Gemini API library not imported - using fallback responses")
+    elif not GEMINI_API_KEY:
+        print("⚠ GEMINI_API_KEY not set - using fallback responses")
 
 # Helper function to format chat history for Gemini
 def format_chat_memory_as_text(chat_history):
-    # Limit memory to last 20 exchanges
-    chat_history = chat_history[-20:]  
+    chat_history = chat_history[-20:]  # Limit memory to last 20 exchanges
     chat_text = []
     for msg in chat_history:
-        role = "You" if msg["role"] == "user" else "AI"
-        content = msg["parts"][0].strip()
-        chat_text.append(f"{role}: {content}")
+        role = "User" if msg.get('role') == 'user' else "Assistant"
+        chat_text.append(f"{role}: {msg.get('content', '')}")
     return "\n".join(chat_text)
 
-# Cache the system prompt to avoid string reconstruction on every request
-SYSTEM_PROMPT = """
-You are a career guidance chatbot that helps users with career planning, skill development, 
-and job search. You have access to the user's profile information, their quiz responses, 
-and can suggest career paths, mentors, and job opportunities based on their interests and skills.
+def serialize_doc(doc):
+    """Convert MongoDB document to JSON-serializable format"""
+    if doc is None:
+        return None
+    if isinstance(doc, list):
+        return [serialize_doc(d) for d in doc]
+    doc = dict(doc)
+    if '_id' in doc:
+        doc['_id'] = str(doc['_id'])
+    for key, value in doc.items():
+        if isinstance(value, ObjectId):
+            doc[key] = str(value)
+        elif isinstance(value, datetime.datetime):
+            doc[key] = value.isoformat()
+    return doc
 
-Always be supportive, encouraging, and provide personalized guidance. If you don't have enough
-information about the user, ask relevant questions to build their profile. Format your responses
-in a clear, structured way.
-"""
+# ============= AUTHENTICATION ROUTES =============
 
 @app.route('/')
-def home():
-    return render_template('index.html')
+def index():
+    if current_user.is_authenticated:
+        if current_user.user_type == 'mentor':
+            return redirect(url_for('mentor_dashboard'))
+        else:
+            return redirect(url_for('home'))
+    return redirect(url_for('login'))
 
-@app.route('/api/user', methods=['POST'])
-def create_user():
-    with get_db() as db:
-        data = request.json
+@app.route('/login')
+def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    return render_template('login.html')
+
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    try:
+        data = request.get_json()
+        username = data.get('username', '').strip()
+        password = data.get('password', '')
         
-        # Check if user already exists
-        existing_user = db.query(User).filter(User.email == data.get('email')).first()
-        if existing_user:
-            return jsonify({"error": "User with this email already exists", "user_id": existing_user.user_id})
+        if not username or not password:
+            return jsonify({'success': False, 'message': 'Username and password required'}), 400
         
-        # Create new user
-        new_user = User(
-            name=data.get('name'),
-            email=data.get('email'),
-            demographics=json.dumps(data.get('demographics', {}))
-        )
+        # Find user by username
+        user_data = users_collection.find_one({'username': username})
         
-        db.add(new_user)
-        db.commit()
-        db.refresh(new_user)
+        if not user_data:
+            return jsonify({'success': False, 'message': 'Invalid username or password'}), 401
         
-        return jsonify({"message": "User created successfully", "user_id": new_user.user_id})
+        # Check password
+        if not check_password_hash(user_data['password_hash'], password):
+            return jsonify({'success': False, 'message': 'Invalid username or password'}), 401
+        
+        # Create user object and log in
+        user = User(user_data)
+        login_user(user)
+        
+        # Determine redirect based on user type
+        redirect_url = '/mentor-dashboard' if user.user_type == 'mentor' else '/home'
+        
+        return jsonify({
+            'success': True,
+            'message': 'Login successful',
+            'redirect': redirect_url,
+            'user_type': user.user_type
+        })
+    
+    except Exception as e:
+        print(f"Login error: {e}")
+        return jsonify({'success': False, 'message': 'An error occurred during login'}), 500
+
+@app.route('/signup')
+def signup():
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    return render_template('signup.html')
+
+@app.route('/api/signup', methods=['POST'])
+def api_signup():
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ['username', 'email', 'password', 'name', 'user_type']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'success': False, 'message': f'{field.capitalize()} is required'}), 400
+        
+        # Check if username or email already exists
+        if users_collection.find_one({'username': data['username']}):
+            return jsonify({'success': False, 'message': 'Username already exists'}), 400
+        
+        if users_collection.find_one({'email': data['email']}):
+            return jsonify({'success': False, 'message': 'Email already exists'}), 400
+        
+        # Create user document
+        user_doc = {
+            'username': data['username'],
+            'email': data['email'],
+            'password_hash': generate_password_hash(data['password']),
+            'name': data['name'],
+            'user_type': data['user_type'],
+            'demographics': {
+                'skills': data.get('skills', []),
+                'interests': data.get('interests', ''),
+                'education': data.get('education', ''),
+                'experience': data.get('experience', ''),
+                'goals': data.get('goals', ''),
+                'location': data.get('location', '')
+            },
+            'created_at': datetime.datetime.utcnow()
+        }
+        
+        # Insert user
+        result = users_collection.insert_one(user_doc)
+        user_id = result.inserted_id
+        
+        # Save quiz responses if provided (from signup form)
+        if data.get('skills') or data.get('interests'):
+            quiz_doc = {
+                'user_id': user_id,
+                'responses': {
+                    'skills': data.get('skills', []),
+                    'interests': data.get('interests', ''),
+                    'education': data.get('education', ''),
+                    'experience': data.get('experience', ''),
+                    'goals': data.get('goals', ''),
+                    'location': data.get('location', '')
+                },
+                'timestamp': datetime.datetime.utcnow()
+            }
+            quiz_responses_collection.insert_one(quiz_doc)
+        
+        # Generate AI recommendations with explicit error handling
+        recommendations = []
+        try:
+            if model:
+                print("Attempting to generate AI recommendations for new user...")
+                prompt = f"""Based on this user profile, suggest 3 career paths:
+                Skills: {', '.join(data.get('skills', []))}
+                Interests: {data.get('interests', '')}
+                Education: {data.get('education', '')}
+                Experience: {data.get('experience', '')}
+                Goals: {data.get('goals', '')}
+                
+                Provide 3 career recommendations in JSON format with: career_path, description, match_score, skills."""
+                
+                response = model.generate_content(prompt)
+                # Parse AI response (simplified - you may need more robust parsing)
+                recommendations = [
+                    {'career_path': 'AI-Generated Path 1', 'description': response.text[:200], 'match_score': 85}
+                ]
+                print("✓ AI recommendations generated successfully")
+        except Exception as e:
+            print(f"⚠ AI API call failed (expected when quota exceeded): {e}")
+            # Fallback to default recommendations based on skills
+            recommendations = generate_fallback_recommendations(data.get('skills', []), data.get('interests', ''))
+        
+        # Save recommendations
+        if recommendations:
+            for rec in recommendations:
+                rec_doc = {
+                    'user_id': user_id,
+                    'career_path': rec.get('career_path', 'Career Path'),
+                    'description': rec.get('description', 'No description available'),
+                    'match_score': rec.get('match_score', 75),
+                    'skills': rec.get('skills', []),
+                    'timestamp': datetime.datetime.utcnow()
+                }
+                recommendations_collection.insert_one(rec_doc)
+        
+        # Log in the new user
+        user_data = users_collection.find_one({'_id': user_id})
+        user = User(user_data)
+        login_user(user)
+        
+        redirect_url = '/mentor-dashboard' if user.user_type == 'mentor' else '/home'
+        
+        return jsonify({
+            'success': True,
+            'message': 'Account created successfully',
+            'redirect': redirect_url
+        })
+    
+    except Exception as e:
+        print(f"Signup error: {e}")
+        return jsonify({'success': False, 'message': 'An error occurred during signup'}), 500
+
+def generate_fallback_recommendations(skills, interests):
+    """Generate fallback recommendations when AI is unavailable"""
+    print("Generating fallback recommendations (AI unavailable)")
+    recommendations = []
+    
+    # Simple rule-based recommendations
+    if 'Programming' in skills or 'Analysis' in skills:
+        recommendations.append({
+            'career_path': 'Software Developer',
+            'description': 'Build software applications and systems using programming languages and frameworks.',
+            'match_score': 85,
+            'skills': ['Programming', 'Problem Solving', 'Analysis']
+        })
+    
+    if 'Design' in skills or 'Communication' in skills:
+        recommendations.append({
+            'career_path': 'UX/UI Designer',
+            'description': 'Create user-friendly interfaces and experiences for digital products.',
+            'match_score': 80,
+            'skills': ['Design', 'Communication', 'Creativity']
+        })
+    
+    if 'Leadership' in skills or 'Management' in skills:
+        recommendations.append({
+            'career_path': 'Project Manager',
+            'description': 'Lead teams and manage projects to successful completion.',
+            'match_score': 78,
+            'skills': ['Leadership', 'Management', 'Communication']
+        })
+    
+    # Default recommendation if no specific skills matched
+    if not recommendations:
+        recommendations.append({
+            'career_path': 'Career Exploration',
+            'description': 'Explore various career paths and develop your skills through courses and projects.',
+            'match_score': 70,
+            'skills': ['Learning', 'Adaptability']
+        })
+    
+    return recommendations[:3]  # Return up to 3 recommendations
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
+
+@app.route('/home')
+@login_required
+def home():
+    if current_user.user_type == 'mentor':
+        return redirect(url_for('mentor_dashboard'))
+    return render_template('dashboard.html')
+
+@app.route('/mentor-dashboard')
+@login_required
+def mentor_dashboard():
+    if current_user.user_type != 'mentor':
+        return redirect(url_for('home'))
+    return render_template('mentor_dashboard.html')
+
+# ============= API ROUTES =============
+
+@app.route('/api/current-user', methods=['GET'])
+@login_required
+def get_current_user():
+    """Get current logged-in user information"""
+    user_data = users_collection.find_one({'_id': ObjectId(current_user.id)})
+    return jsonify(serialize_doc(user_data))
 
 @app.route('/api/chat', methods=['POST'])
+@login_required
 def chat():
-    with get_db() as db:
-        data = request.json
-        user_id = data.get('user_id')
-        user_message = data.get('message')
-
-        # Get user
-        user = db.query(User).filter(User.user_id == user_id).first()
-        if not user:
-            return jsonify({"error": "User not found"}), 404
-
-        # Get or create user session
-        session = db.query(UserSession).filter(UserSession.user_id == user_id).first()
-        if not session:
-            session = UserSession(user_id=user_id, conversation_history=json.dumps([]))
-            db.add(session)
-            db.commit()
-            db.refresh(session)
-
-        # Get and format chat history
-        chat_history = json.loads(session.conversation_history or "[]")
-        chat_memory = format_chat_memory_as_text(chat_history)
-
-        # Prepare user context - using more efficient querying
-        quiz_responses = db.query(QuizResponse).filter(QuizResponse.user_id == user_id).all()
+    try:
+        data = request.get_json()
+        user_message = data.get('message', '').strip()
         
-        # Only fetch career recommendations if we have quiz responses
-        career_recommendations = []
-        if quiz_responses:
-            career_recommendations = db.query(CareerRecommendation).filter(CareerRecommendation.user_id == user_id).all()
+        if not user_message:
+            return jsonify({'success': False, 'message': 'Message cannot be empty'}), 400
         
-        # Use a join to get mentor information in a single query
-        mentor_info = []
-        mentor_connections = db.query(MentorConnection, Mentor).join(
-            Mentor, MentorConnection.mentor_id == Mentor.mentor_id
-        ).filter(
-            MentorConnection.user_id == user_id,
-            MentorConnection.status == "connected"
-        ).all()
+        # Get user data for context
+        user_data = users_collection.find_one({'_id': ObjectId(current_user.id)})
+        demographics = user_data.get('demographics', {})
         
-        for connection, mentor in mentor_connections:
-            mentor_info.append({
-                "name": mentor.name,
-                "industry": mentor.industry,
-                "expertise": mentor.expertise
-            })
+        # Get recent chat history
+        recent_chats = list(sessions_collection.find({'user_id': ObjectId(current_user.id)})
+                           .sort('timestamp', -1).limit(10))
+        chat_history = [{'role': chat.get('role', 'user'), 'content': chat.get('message', '')} 
+                       for chat in reversed(recent_chats)]
         
-        # Get recent job opportunities that match user's interests - limit DB query
-        user_interests = [q.answer for q in quiz_responses if q.quiz_type == "interests"]
-        relevant_jobs = []
-        if user_interests:
-            # Get jobs that might match user interests - limited to 5 most recent
-            jobs = db.query(JobOpportunity).order_by(JobOpportunity.posted_at.desc()).limit(5).all()
-            relevant_jobs = [{
-                "title": job.title,
-                "company": job.company,
-                "industry": job.industry,
-                "location": job.location
-            } for job in jobs]
-
-        # Build user context object
-        user_context = {
-            "name": user.name,
-            "demographics": json.loads(user.demographics) if user.demographics else {},
-            "quiz_responses": [{"question": q.question, "answer": q.answer, "type": q.quiz_type} for q in quiz_responses],
-            "recommendations": [{"career": r.career_path, "text": r.recommendation_text} for r in career_recommendations],
-            "mentors": mentor_info,
-            "relevant_jobs": relevant_jobs,
-            "current_date": "Sunday, April 06, 2025, 5:45 PM IST"
-        }
-
-        # Build final prompt string
-        final_prompt = f"""{SYSTEM_PROMPT.strip()}
-
-User context: {json.dumps(user_context, indent=2)}
-
-Chat history:
-{chat_memory}
-
-Please provide a well-structured response that:
-1. Directly addresses the user's current question
-2. Maintains continuity with our previous conversation
-3. Uses clear headings, bullet points, or numbered lists when appropriate
-4. Provides specific, actionable advice related to career guidance
-5. References relevant information from the user's profile when applicable
-
-User: {user_message}
-
-Bot:"""
-
-        # Call Gemini model
-        response = model.generate_content(final_prompt)
-        response_text = response.text.strip()
-
-        # Only process potential skill/interest extraction if the message is likely to contain them
-        # This avoids redundant database operations
-        if any(keyword in user_message.lower() for keyword in ["my skill", "i am good at", "i like", "my interest", "i enjoy"]):
-            # Extract potential quiz data
-            quiz_type = "skills" if any(k in user_message.lower() for k in ["skill", "good at", "can do"]) else "interests"
-            
-            # Save as a quiz response
-            new_quiz = QuizResponse(
-                user_id=user_id,
-                question=f"Information extracted from chat about {quiz_type}",
-                answer=user_message,
-                quiz_type=quiz_type
-            )
-            db.add(new_quiz)
-            db.commit()
-
-        # Update chat history efficiently
-        new_history = chat_history + [
-            {"role": "user", "parts": [user_message]},
-            {"role": "model", "parts": [response_text]}
-        ]
-
-        # Save updated chat history
-        session.conversation_history = json.dumps(new_history)
-        session.last_updated = datetime.datetime.utcnow()
-        db.commit()
-
-        return jsonify({"response": response_text})
-
-@app.route('/api/quiz', methods=['POST'])
-def save_quiz():
-    with get_db() as db:
-        data = request.json
-        user_id = data.get('user_id')
-        question = data.get('question')
-        answer = data.get('answer')
-        quiz_type = data.get('quiz_type', 'general')
+        # Build context prompt
+        context = f"""User Profile:
+        Name: {user_data.get('name', 'User')}
+        Skills: {', '.join(demographics.get('skills', []))}
+        Interests: {demographics.get('interests', 'Not specified')}
+        Goals: {demographics.get('goals', 'Not specified')}
         
-        # Validate user exists
-        user = db.query(User).filter(User.user_id == user_id).first()
-        if not user:
-            return jsonify({"error": "User not found"}), 404
+        Recent Conversation:
+        {format_chat_memory_as_text(chat_history)}
         
-        # Save quiz response
-        quiz_response = QuizResponse(
-            user_id=user_id,
-            question=question,
-            answer=answer,
-            quiz_type=quiz_type
-        )
-        
-        db.add(quiz_response)
-        db.commit()
-        
-        return jsonify({"status": "success", "message": "Quiz response saved"})
-
-@lru_cache(maxsize=128)
-def get_cached_recommendations(user_id, cache_key):
-    """Cache recommendations to reduce database load"""
-    with get_db() as db:
-        existing_recs = db.query(CareerRecommendation).filter(CareerRecommendation.user_id == user_id).all()
-        recommendations = [
-            {
-                "id": rec.recommendation_id,
-                "career_path": rec.career_path,
-                "text": rec.recommendation_text,
-                "confidence": rec.confidence_score,
-                "created_at": rec.created_at.isoformat()
-            }
-            for rec in existing_recs
-        ]
-        return recommendations
-
-@app.route('/api/recommendations', methods=['GET'])
-def get_recommendations():
-    user_id = request.args.get('user_id')
-    cache_key = f"user_recommendations_{user_id}"
-    
-    with get_db() as db:
-        # Validate user exists
-        user = db.query(User).filter(User.user_id == user_id).first()
-        if not user:
-            return jsonify({"error": "User not found"}), 404
-        
-        # Get quiz responses
-        quiz_responses = db.query(QuizResponse).filter(QuizResponse.user_id == user_id).all()
-        if not quiz_responses:
-            return jsonify({"error": "No quiz responses found for this user"}), 404
-        
-        # Get existing recommendations
-        existing_recs = db.query(CareerRecommendation).filter(CareerRecommendation.user_id == user_id).all()
-        
-        # If recommendations exist, return them
-        if existing_recs:
-            # Use cached results if available
-            recommendations = get_cached_recommendations(user_id, cache_key)
-            return jsonify({"recommendations": recommendations})
-        
-        # Otherwise, generate new recommendations using Gemini
-        # Prepare quiz data for the LLM
-        quiz_data = [
-            {
-                "question": q.question,
-                "answer": q.answer,
-                "type": q.quiz_type
-            }
-            for q in quiz_responses
-        ]
-        
-        # Create prompt for Gemini
-        recommendation_prompt = f"""
-        Based on the following quiz responses from {user.name}, suggest 3 possible career paths.
-        For each career path, provide:
-        1. The name of the career path
-        2. A brief explanation of why it's a good fit (3-5 sentences)
-        3. A confidence score (0-100)
-        
-        Quiz responses:
-        {json.dumps(quiz_data, indent=2)}
-        
-        Format your response as a JSON array with objects containing the fields: career_path, explanation, confidence_score
+        User's Question: {user_message}
         """
         
-        # Get recommendations from Gemini
-        response = model.generate_content(recommendation_prompt)
+        response_text = ""
         
+        # Try to get AI response with explicit error handling
         try:
-            # Parse the response and extract the recommendations
-            recommendations_json = json.loads(response.text)
-            
-            # Batch add recommendations for better performance
-            recommendations_to_add = []
-            for rec in recommendations_json:
-                new_rec = CareerRecommendation(
-                    user_id=user_id,
-                    career_path=rec["career_path"],
-                    recommendation_text=rec["explanation"],
-                    confidence_score=rec["confidence_score"]
-                )
-                recommendations_to_add.append(new_rec)
-            
-            if recommendations_to_add:
-                db.bulk_save_objects(recommendations_to_add)
-                db.commit()
-            
-            # Fetch the newly created recommendations with their IDs
-            new_recs = db.query(CareerRecommendation).filter(CareerRecommendation.user_id == user_id).all()
-            recommendations = [
-                {
-                    "id": rec.recommendation_id,
-                    "career_path": rec.career_path,
-                    "text": rec.recommendation_text,
-                    "confidence": rec.confidence_score,
-                    "created_at": rec.created_at.isoformat()
-                }
-                for rec in new_recs
-            ]
-            
-            # Invalidate the cache key
-            get_cached_recommendations.cache_clear()
-            
-            return jsonify({"recommendations": recommendations})
-        
+            if model:
+                print(f"Sending chat request to Gemini API...")
+                prompt = f"""You are a career guidance counselor. Based on the context below, provide helpful career advice.
+                
+                {context}
+                
+                Provide a concise, helpful response focused on career guidance."""
+                
+                response = model.generate_content(prompt)
+                response_text = response.text
+                print("✓ AI response received successfully")
         except Exception as e:
-            return jsonify({"error": f"Error generating recommendations: {str(e)}"}), 500
+            print(f"⚠ AI API call failed (expected when quota exceeded): {e}")
+            # Fallback response
+            response_text = """I'm here to help with your career journey! While I'm experiencing some technical limitations right now, I can still assist you with:
+
+- Career path recommendations based on your skills and interests
+- Guidance on skill development and education
+- Job search strategies
+- Resume and interview tips
+- Connecting with mentors in your field
+
+Could you tell me more specifically what aspect of your career you'd like to discuss?"""
+        
+        # Save chat messages to session history
+        sessions_collection.insert_one({
+            'user_id': ObjectId(current_user.id),
+            'role': 'user',
+            'message': user_message,
+            'timestamp': datetime.datetime.utcnow()
+        })
+        
+        sessions_collection.insert_one({
+            'user_id': ObjectId(current_user.id),
+            'role': 'assistant',
+            'message': response_text,
+            'timestamp': datetime.datetime.utcnow()
+        })
+        
+        return jsonify({'success': True, 'response': response_text})
+    
+    except Exception as e:
+        print(f"Chat error: {e}")
+        return jsonify({
+            'success': False,
+            'response': 'Sorry, I encountered an error processing your message. Please try again.'
+        }), 500
+
+@app.route('/api/recommendations', methods=['GET'])
+@login_required
+def get_recommendations():
+    """Get career recommendations for current user"""
+    try:
+        recs = list(recommendations_collection.find({'user_id': ObjectId(current_user.id)})
+                   .sort('timestamp', -1).limit(10))
+        
+        # If no recommendations, try to generate some
+        if not recs:
+            user_data = users_collection.find_one({'_id': ObjectId(current_user.id)})
+            demographics = user_data.get('demographics', {})
+            
+            try:
+                if model:
+                    print("Generating recommendations via AI...")
+                    prompt = f"""Based on this profile, suggest 3 career paths:
+                    Skills: {', '.join(demographics.get('skills', []))}
+                    Interests: {demographics.get('interests', '')}
+                    Goals: {demographics.get('goals', '')}
+                    
+                    Provide career recommendations with path name, description, and match score."""
+                    
+                    response = model.generate_content(prompt)
+                    # For simplicity, create a basic recommendation from response
+                    rec_doc = {
+                        'user_id': ObjectId(current_user.id),
+                        'career_path': 'AI-Generated Recommendation',
+                        'description': response.text[:300],
+                        'match_score': 85,
+                        'skills': demographics.get('skills', []),
+                        'timestamp': datetime.datetime.utcnow()
+                    }
+                    recommendations_collection.insert_one(rec_doc)
+                    recs = [rec_doc]
+                    print("✓ AI recommendations generated")
+            except Exception as e:
+                print(f"⚠ AI recommendation generation failed (expected): {e}")
+                # Generate fallback recommendations
+                fallback_recs = generate_fallback_recommendations(
+                    demographics.get('skills', []),
+                    demographics.get('interests', '')
+                )
+                for rec in fallback_recs:
+                    rec_doc = {
+                        'user_id': ObjectId(current_user.id),
+                        'career_path': rec['career_path'],
+                        'description': rec['description'],
+                        'match_score': rec['match_score'],
+                        'skills': rec['skills'],
+                        'timestamp': datetime.datetime.utcnow()
+                    }
+                    recommendations_collection.insert_one(rec_doc)
+                    recs.append(rec_doc)
+        
+        return jsonify({'success': True, 'recommendations': serialize_doc(recs)})
+    
+    except Exception as e:
+        print(f"Recommendations error: {e}")
+        return jsonify({'success': False, 'recommendations': []}), 500
 
 @app.route('/api/mentors', methods=['GET'])
+@login_required
 def get_mentors():
-    with get_db() as db:
-        industry = request.args.get('industry')
-        expertise = request.args.get('expertise')
+    """Get list of mentors with optional filtering"""
+    try:
+        industry = request.args.get('industry', '').strip()
+        expertise = request.args.get('expertise', '').strip()
         
-        # Build query for mentors
-        query = db.query(Mentor)
-        
-        # Apply filters if provided
-        if industry:
-            query = query.filter(Mentor.industry == industry)
+        query = {}
+        if industry and industry != 'all':
+            query['industry'] = industry
         if expertise:
-            query = query.filter(Mentor.expertise == expertise)
+            query['expertise'] = {'$in': [expertise]}
         
-        mentors = query.all()
-        
-        # Format mentor data
-        mentor_list = [
-            {
-                "id": mentor.mentor_id,
-                "name": mentor.name,
-                "industry": mentor.industry,
-                "expertise": mentor.expertise,
-                "experience_years": mentor.experience_years,
-                "availability": json.loads(mentor.availability) if mentor.availability else {}
-            }
-            for mentor in mentors
-        ]
-        
-        return jsonify({"mentors": mentor_list})
+        mentors = list(mentors_collection.find(query).limit(50))
+        return jsonify({'success': True, 'mentors': serialize_doc(mentors)})
+    
+    except Exception as e:
+        print(f"Mentors error: {e}")
+        return jsonify({'success': False, 'mentors': []}), 500
 
 @app.route('/api/mentor-connection', methods=['POST'])
-def create_mentor_connection():
-    with get_db() as db:
-        data = request.json
-        user_id = data.get('user_id')
-        mentor_id = data.get('mentor_id')
+@login_required
+def request_mentor_connection():
+    """Request connection with a mentor"""
+    try:
+        data = request.get_json()
+        mentor_id = data.get('mentor_id', '').strip()
+        message = data.get('message', '').strip()
         
-        # Use a single query to validate both user and mentor exist
-        user_exists = db.query(User).filter(User.user_id == user_id).first() is not None
-        mentor_exists = db.query(Mentor).filter(Mentor.mentor_id == mentor_id).first() is not None
+        if not mentor_id:
+            return jsonify({'success': False, 'message': 'Mentor ID required'}), 400
         
-        if not user_exists:
-            return jsonify({"error": "User not found"}), 404
-        if not mentor_exists:
-            return jsonify({"error": "Mentor not found"}), 404
+        # Check if mentor exists
+        mentor = mentors_collection.find_one({'_id': ObjectId(mentor_id)})
+        if not mentor:
+            return jsonify({'success': False, 'message': 'Mentor not found'}), 404
         
         # Check if connection already exists
-        existing_connection = db.query(MentorConnection).filter(
-            MentorConnection.user_id == user_id,
-            MentorConnection.mentor_id == mentor_id
-        ).first()
+        existing = mentor_connections_collection.find_one({
+            'user_id': ObjectId(current_user.id),
+            'mentor_id': ObjectId(mentor_id)
+        })
         
-        if existing_connection:
-            return jsonify({"error": "Connection already exists", "status": existing_connection.status}), 400
+        if existing:
+            return jsonify({'success': False, 'message': 'Connection request already exists'}), 400
         
-        # Create new connection
-        connection = MentorConnection(
-            user_id=user_id,
-            mentor_id=mentor_id,
-            status="pending"
-        )
+        # Create connection request
+        connection_doc = {
+            'user_id': ObjectId(current_user.id),
+            'user_name': current_user.name,
+            'user_email': current_user.email,
+            'mentor_id': ObjectId(mentor_id),
+            'mentor_name': mentor.get('name', ''),
+            'message': message,
+            'status': 'pending',
+            'timestamp': datetime.datetime.utcnow()
+        }
         
-        db.add(connection)
-        db.commit()
+        mentor_connections_collection.insert_one(connection_doc)
         
-        return jsonify({"status": "success", "message": "Mentor connection request sent"})
+        return jsonify({'success': True, 'message': 'Connection request sent successfully'})
+    
+    except Exception as e:
+        print(f"Mentor connection error: {e}")
+        return jsonify({'success': False, 'message': 'Failed to send connection request'}), 500
 
 @app.route('/api/jobs', methods=['GET'])
+@login_required
 def get_jobs():
-    with get_db() as db:
-        industry = request.args.get('industry')
-        location = request.args.get('location')
+    """Get job opportunities with optional filtering"""
+    try:
+        industry = request.args.get('industry', '').strip()
+        location = request.args.get('location', '').strip()
         
-        # Build more efficient query for jobs
-        query = db.query(
-            JobOpportunity.job_id,
-            JobOpportunity.title,
-            JobOpportunity.company,
-            JobOpportunity.description,
-            JobOpportunity.industry,
-            JobOpportunity.location,
-            JobOpportunity.salary_range,
-            JobOpportunity.requirements,
-            JobOpportunity.posted_at
+        query = {}
+        if industry and industry != 'all':
+            query['industry'] = industry
+        if location:
+            query['location'] = {'$regex': location, '$options': 'i'}
+        
+        jobs = list(jobs_collection.find(query).limit(50))
+        return jsonify({'success': True, 'jobs': serialize_doc(jobs)})
+    
+    except Exception as e:
+        print(f"Jobs error: {e}")
+        return jsonify({'success': False, 'jobs': []}), 500
+
+# ============= MENTOR-SPECIFIC ROUTES =============
+
+@app.route('/api/mentor-stats', methods=['GET'])
+@login_required
+def get_mentor_stats():
+    """Get mentor statistics (for mentor dashboard)"""
+    try:
+        if current_user.user_type != 'mentor':
+            return jsonify({'success': False, 'message': 'Not authorized'}), 403
+        
+        # Count connections
+        total_connections = mentor_connections_collection.count_documents({
+            'mentor_id': ObjectId(current_user.id),
+            'status': 'accepted'
+        })
+        
+        pending_requests = mentor_connections_collection.count_documents({
+            'mentor_id': ObjectId(current_user.id),
+            'status': 'pending'
+        })
+        
+        return jsonify({
+            'success': True,
+            'total_connections': total_connections,
+            'pending_requests': pending_requests,
+            'total_messages': 0,  # Placeholder
+            'avg_rating': 5.0  # Placeholder
+        })
+    
+    except Exception as e:
+        print(f"Mentor stats error: {e}")
+        return jsonify({'success': False}), 500
+
+@app.route('/api/mentor-requests', methods=['GET'])
+@login_required
+def get_mentor_requests():
+    """Get pending mentor connection requests"""
+    try:
+        if current_user.user_type != 'mentor':
+            return jsonify({'success': False, 'message': 'Not authorized'}), 403
+        
+        requests = list(mentor_connections_collection.find({
+            'mentor_id': ObjectId(current_user.id),
+            'status': 'pending'
+        }).sort('timestamp', -1))
+        
+        return jsonify({'success': True, 'requests': serialize_doc(requests)})
+    
+    except Exception as e:
+        print(f"Mentor requests error: {e}")
+        return jsonify({'success': False, 'requests': []}), 500
+
+@app.route('/api/mentor-mentees', methods=['GET'])
+@login_required
+def get_mentor_mentees():
+    """Get list of accepted mentees"""
+    try:
+        if current_user.user_type != 'mentor':
+            return jsonify({'success': False, 'message': 'Not authorized'}), 403
+        
+        mentees = list(mentor_connections_collection.find({
+            'mentor_id': ObjectId(current_user.id),
+            'status': 'accepted'
+        }).sort('timestamp', -1))
+        
+        return jsonify({'success': True, 'mentees': serialize_doc(mentees)})
+    
+    except Exception as e:
+        print(f"Mentor mentees error: {e}")
+        return jsonify({'success': False, 'mentees': []}), 500
+
+@app.route('/api/mentor-accept', methods=['POST'])
+@login_required
+def accept_mentor_request():
+    """Accept a mentor connection request"""
+    try:
+        if current_user.user_type != 'mentor':
+            return jsonify({'success': False, 'message': 'Not authorized'}), 403
+        
+        data = request.get_json()
+        request_id = data.get('request_id', '').strip()
+        
+        if not request_id:
+            return jsonify({'success': False, 'message': 'Request ID required'}), 400
+        
+        result = mentor_connections_collection.update_one(
+            {'_id': ObjectId(request_id), 'mentor_id': ObjectId(current_user.id)},
+            {'$set': {'status': 'accepted', 'accepted_at': datetime.datetime.utcnow()}}
         )
         
-        # Apply filters if provided
-        if industry:
-            query = query.filter(JobOpportunity.industry == industry)
-        if location:
-            query = query.filter(JobOpportunity.location == location)
+        if result.modified_count > 0:
+            return jsonify({'success': True, 'message': 'Request accepted successfully'})
+        else:
+            return jsonify({'success': False, 'message': 'Request not found'}), 404
+    
+    except Exception as e:
+        print(f"Accept request error: {e}")
+        return jsonify({'success': False, 'message': 'Failed to accept request'}), 500
+
+@app.route('/api/mentor-reject', methods=['POST'])
+@login_required
+def reject_mentor_request():
+    """Reject a mentor connection request"""
+    try:
+        if current_user.user_type != 'mentor':
+            return jsonify({'success': False, 'message': 'Not authorized'}), 403
         
-        # Get most recent jobs, limit to 20
-        jobs = query.order_by(JobOpportunity.posted_at.desc()).limit(20).all()
+        data = request.get_json()
+        request_id = data.get('request_id', '').strip()
         
-        # Format job data
-        job_list = [
-            {
-                "id": job.job_id,
-                "title": job.title,
-                "company": job.company,
-                "description": job.description,
-                "industry": job.industry,
-                "location": job.location,
-                "salary_range": job.salary_range,
-                "requirements": job.requirements,
-                "posted_at": job.posted_at.isoformat()
-            }
-            for job in jobs
-        ]
+        if not request_id:
+            return jsonify({'success': False, 'message': 'Request ID required'}), 400
         
-        return jsonify({"jobs": job_list})
+        result = mentor_connections_collection.update_one(
+            {'_id': ObjectId(request_id), 'mentor_id': ObjectId(current_user.id)},
+            {'$set': {'status': 'rejected', 'rejected_at': datetime.datetime.utcnow()}}
+        )
+        
+        if result.modified_count > 0:
+            return jsonify({'success': True, 'message': 'Request rejected'})
+        else:
+            return jsonify({'success': False, 'message': 'Request not found'}), 404
+    
+    except Exception as e:
+        print(f"Reject request error: {e}")
+        return jsonify({'success': False, 'message': 'Failed to reject request'}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Create default users (user/password and mentor/password)
+    create_default_users()
+    
+    # Run the app
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
