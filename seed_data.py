@@ -1,3 +1,4 @@
+# Migrated to MongoDB
 # seed_data.py - Seed MongoDB with demo data
 from db import (
     init_db, users_collection, mentors_collection, jobs_collection,

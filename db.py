@@ -1,3 +1,4 @@
+# Migrated to MongoDB
 # db.py - MongoDB Database Setup
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import DuplicateKeyError
